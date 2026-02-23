@@ -1,0 +1,169 @@
+---
+title: "HW1"
+output: html_document
+date: "2026-02-22"
+---
+
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(ISLR)
+library(glmnet)
+library(caret)
+library(tidymodels)
+library(corrplot)
+library(ggplot2)
+library(plotmo)
+library(ggrepel)
+library(plotmo)
+library(pls)
+```
+
+## A. Lasso Model (glmnet)
+
+This plot shows that MSE increases as lambda increases. The first dashed line to the left represents the 1SE rule and the second, the minimal MSE. 
+
+To minimize MSE:
+Lambda = 51.38745 
+MSE = 441,449,473 
+
+When the 1SE rule is applied, 30 predictors are included in the model.
+
+```{r Lasso}
+train_df <- read_csv("data/housing_training.csv")
+test_df <- read_csv("data/housing_test.csv")
+
+train_df <- na.omit(train_df)
+test_df <- na.omit(test_df)
+
+# Prepare the matrices
+x <- model.matrix(Sale_Price ~ ., data = train_df)[, -1]
+
+# extract the column as a vector
+y <- train_df$Sale_Price 
+
+# Preparation for testing
+x_test <- model.matrix(Sale_Price ~ ., data = test_df)[, -1]
+
+# Fit Lasso with CV (Fixing typos: 'lambda' and 'length = 100')
+set.seed(2)
+cv.lasso <- cv.glmnet(x, y, 
+                      alpha = 1, 
+                      lambda = exp(seq(10, -5, length = 100)))
+
+# Report results
+cat("Selected Lambda (min):", cv.lasso$lambda.min, "\n")
+# Report the 1SE tuning parameter
+cat("Selected Lambda (1SE):", cv.lasso$lambda.1se, "\n")
+
+# Plotting MSE by log(lambda) and Coefficients by Lambda
+par(mfrow = c(1, 2))
+plot(cv.lasso)
+plot_glmnet(cv.lasso$glmnet.fit)
+par(mfrow = c(1, 1))
+
+# Calculate Test Error (using the minimal MSE lambda)
+lasso_pred <- predict(cv.lasso, newx = x_test, s = "lambda.min")
+test_mse_lasso <- mean((lasso_pred - test_df$Sale_Price)^2)
+cat("Lasso Test MSE:", test_mse_lasso, "\n")
+
+coef_1se <- predict(cv.lasso, s = "lambda.1se", type = "coefficients")
+
+num_predictors_1se <- sum(coef_1se != 0) - 1
+cat("Number of predictors (1SE rule):", num_predictors_1se, "\n")
+```
+
+---
+
+## B. Elastic Net Model (caret)
+
+Selected tuning parameters:
+alpha = 0.15 ; lambda = 272.0703
+
+Test Error (MSE) = 440,282,742
+
+It is not possible to the 1SE rule for Elastic Net as we would need to tune both parameters simultaneously. Furthermore, because changes in both alpha and lambda can lead to simplicity, there is no one way to get there when they are both changing at the same time.
+
+```{r Elastic Net}
+ctrl1 <- trainControl(method = "cv", number = 10)
+
+set.seed(2)
+enet.fit = train(Sale_Price ~ .,
+                 data = train_df,
+                 method = "glmnet",
+                 tuneGrid = expand.grid(alpha = seq(0, 1, length = 21),
+                                        lambda = exp(seq(10, -5, length = 100))),
+                 trControl = ctrl1)
+
+print(enet.fit$bestTune)
+enet_pred <- predict(enet.fit, newdata = test_df)
+test_mse_enet <- mean((enet_pred - test_df$Sale_Price)^2)
+cat("Elastic Net Test MSE:", test_mse_enet, "\n")
+```
+
+---
+
+## C. PLS Model
+
+13 components are included in the PLS model
+Optimal number of componenets = 13
+Test Error (MSE) = 448,737,340 
+
+```{r PLS}
+set.seed(2)
+pls.fit <- train(Sale_Price ~ ., 
+                 data = train_df, 
+                 method = "pls", 
+                 tuneLength = 15, 
+                 trControl = ctrl1, 
+                 scale = TRUE)
+
+cat("Optimal components:", pls.fit$bestTune$ncomp, "\n")
+
+pls_pred <- predict(pls.fit, newdata = test_df)
+test_mse_pls <- mean((pls_pred - test_df$Sale_Price)^2)
+cat("PLS Test MSE:", test_mse_pls, "\n")
+
+# Visualize the results
+plot(pls.fit)
+```
+
+---
+
+## D. Model Comparison
+
+Summary of MSE by Model Type:
+Lasso MSE = 441,449,473
+Elastic Net MSE = 440,282,742
+PLS MSE = 448,737,340
+
+Best performer: Elastic Net
+
+Justification:
+
+Elastic Net yields the lowest MSE which indicates that it is the best performing model. This is likely because Elastic Net combines strengths from Lasso and Ridge, it can perform some feature selection while also managing highly co-linear predictors. In this scenario, alpha was 0.15 which is relatively low indicating that the model leaned into Ridge regression and likely benefited from shrinkage all while also performing some feature selection like lasso to remove some noise from the model. 
+
+---
+
+## E. Rerunning Lasso with Caret
+
+glmnet Lambda: 51.38745 
+caret Lambda: 51.38745
+
+The lambdas were identical despite the use of different packages. Since the same seed and search grid for lambda was applied using the different packages, the same result was obtained. If there was a need for scaling, there may have been differences between the tuning parameters of the different packages.
+
+```{r Retrain}
+# Retrain Lasso using caret
+set.seed(2)
+lasso_caret <- train(Sale_Price ~ ., 
+                     data = train_df, 
+                     method = "glmnet",
+                     tuneGrid = expand.grid(alpha = 1, 
+                                            lambda = exp(seq(10, -5, length = 100))),
+                     trControl = ctrl1)
+
+# Compare the selected lambdas
+cat("Glmnet (Part a) Lambda:", cv.lasso$lambda.min, "\n")
+cat("Caret (Part e) Lambda:", lasso_caret$bestTune$lambda, "\n")
+```
+
