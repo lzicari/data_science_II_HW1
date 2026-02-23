@@ -393,7 +393,7 @@ y &lt;- train_df$Sale_Price
 # Preparation for testing
 x_test &lt;- model.matrix(Sale_Price ~ ., data = test_df)[, -1]
 
-# Fit Lasso with CV (Fixing typos: &#39;lambda&#39; and &#39;length = 100&#39;)
+# Fit Lasso with CV
 set.seed(2)
 cv.lasso &lt;- cv.glmnet(x, y, 
                       alpha = 1, 
